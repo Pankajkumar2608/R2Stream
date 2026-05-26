@@ -19,7 +19,6 @@ import { config } from "./utils/config";
 
 import { log, time } from "./utils/logger";
 
-
 // R2 Client
 
 function makeR2Client(): S3Client {
@@ -34,7 +33,7 @@ function makeR2Client(): S3Client {
   });
 }
 
-// Manifest 
+//  Manifest ─
 
 async function loadManifest(r2: S3Client): Promise<Manifest> {
   try {
@@ -75,7 +74,7 @@ async function saveManifest(r2: S3Client, manifest: Manifest): Promise<void> {
   log.ok(`Manifest saved — ${manifest.trackCount} tracks total`);
 }
 
-//Helpers 
+//  Helpers 
 
 /** Strip characters unsafe for filenames */
 function safeFilename(text: string, maxLen = 80): string {
@@ -97,6 +96,12 @@ async function ytdlp(args: string[]): Promise<any> {
     log.error("yt-dlp stderr: " + result.stderr.slice(0, 500));
   }
   return result;
+}
+
+/** Returns --cookies flag args if YOUTUBE_COOKIES env var is set */
+function cookieArgs(): string[] {
+  const cookiePath = process.env.YOUTUBE_COOKIES;
+  return cookiePath ? ["--cookies", cookiePath] : [];
 }
 
 /** Pool: run tasks with limited concurrency */
@@ -134,6 +139,7 @@ async function extractPlaylistEntries(url: string): Promise<PlaylistEntry[]> {
       "--no-playlist", // never expand a playlist even if URL has one
       "--dump-single-json", // return full metadata as one JSON object
       "--no-warnings",
+      ...cookieArgs(),
       url,
     ]);
 
@@ -155,7 +161,7 @@ async function extractPlaylistEntries(url: string): Promise<PlaylistEntry[]> {
     return [];
   }
 
-  //  Playlist 
+  //  Playlist ─
   log.info(`Extracting playlist: ${url}`);
   const result = await ytdlp([
     "--flat-playlist", // fast: list entries without downloading
@@ -163,6 +169,7 @@ async function extractPlaylistEntries(url: string): Promise<PlaylistEntry[]> {
     "--no-warnings",
     "--print-json", // one JSON object per line
     "--quiet",
+    ...cookieArgs(),
     url,
   ]);
 
@@ -244,6 +251,7 @@ async function downloadAndUpload(
       "5", // faster fragment downloads
       "--no-warnings",
       "--quiet",
+      ...cookieArgs(),
       "--output",
       join(tmpDir, "%(id)s.%(ext)s"),
       trackUrl,
@@ -256,7 +264,7 @@ async function downloadAndUpload(
       return null;
     }
 
-    // Find downloaded files 
+    //  Find downloaded files ─
     const files = await readdir(tmpDir);
     const audioFile = files.find((f) =>
       f.endsWith(`.${config.download.audioFormat}`),
@@ -291,7 +299,7 @@ async function downloadAndUpload(
     );
     log.ok(`Uploaded audio: ${filename} (${Math.round(sizeBytes / 1024)} KB)`);
 
-    // Upload cover art to R2 
+    //  Upload cover art to R2 
     let coverUploaded = false;
     if (coverPath) {
       try {
@@ -342,7 +350,7 @@ async function downloadAndUpload(
   }
 }
 
-//  Main 
+//  Main ─
 
 async function sync(playlistUrls: string[]): Promise<void> {
   if (playlistUrls.length === 0) {
@@ -378,7 +386,7 @@ async function sync(playlistUrls: string[]): Promise<void> {
     return;
   }
 
-  log.info(`${newEntries.length} new tracks to download`);
+  log.info(`🆕 ${newEntries.length} new tracks to download`);
 
   //  Download + upload with limited concurrency 
   let added = 0;
@@ -411,14 +419,14 @@ async function sync(playlistUrls: string[]): Promise<void> {
     config.download.maxWorkers,
   );
 
-  //  Summary ─
+  //  Summary 
   console.log("\n" + "=".repeat(50));
   log.ok(`Sync complete: ${added} added, ${failed} failed`);
   log.info(`Total library: ${Object.keys(manifest.tracks).length} tracks`);
   console.log("=".repeat(50) + "\n");
 }
 
-//  Entry Point ─
+//  Entry Point 
 
 const urls: string[] = (() => {
   // CLI args: npx tsx sync.ts <url1> <url2>

@@ -20,7 +20,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Node ─────────────────────────────────────────────────────────────────
+      # ── Node ───
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -28,12 +28,12 @@ jobs:
           cache: "npm"
           cache-dependency-path: downloader/package-lock.json
 
-      # ── npm install ───────────────────────────────────────────────────────────
+      # ── npm install ─
       - name: Install dependencies
         run: npm ci
         working-directory: downloader
 
-      # ── Cache ffmpeg ──────────────────────────────────────────────────────────
+      # ── Cache ffmpeg 
       - name: Cache ffmpeg
         id: cache-ffmpeg
         uses: actions/cache@v4
@@ -71,14 +71,18 @@ jobs:
       - name: Add yt-dlp to PATH
         run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      # ── Verify tools ──────────────────────────────────────────────────────────
+      # ── Verify tools 
       - name: Verify tools
         run: |
           node --version
           ffmpeg -version | head -1
           yt-dlp --version
 
-      # ── Run sync ──────────────────────────────────────────────────────────────
+      - name: Write YouTube cookies
+        run: |
+          echo "${{ secrets.YOUTUBE_COOKIES_B64 }}" | base64 --decode > /tmp/cookies.txt
+
+      # ── Run sync 
       - name: Debug secrets
         run: |
           echo "R2_ENDPOINT set: ${{ secrets.R2_ENDPOINT != '' }}"
@@ -94,4 +98,5 @@ jobs:
           R2_BUCKET:     ${{ secrets.R2_BUCKET }}
           R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
           PLAYLIST_URLS: ${{ inputs.playlist_urls || secrets.PLAYLIST_URLS }}
+          YOUTUBE_COOKIES: /tmp/cookies.txt
         run: npm run sync
