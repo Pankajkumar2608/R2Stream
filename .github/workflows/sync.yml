@@ -53,23 +53,14 @@ jobs:
       - name: Add ffmpeg to PATH
         run: echo "$HOME/ffmpeg" >> $GITHUB_PATH
 
-      # ── Cache yt-dlp ─────────────────────────────────────────────────────────
-      - name: Cache yt-dlp
-        id: cache-ytdlp
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/bin/yt-dlp
-          key: yt-dlp-2026
-
-      - name: Install yt-dlp (first run only)
-        if: steps.cache-ytdlp.outputs.cache-hit != 'true'
+      # ── Install yt-dlp
+      - name: Install yt-dlp (always latest)
         run: |
           mkdir -p ~/.local/bin
           curl -sL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o ~/.local/bin/yt-dlp
           chmod +x ~/.local/bin/yt-dlp
-
-      - name: Add yt-dlp to PATH
-        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          yt-dlp --version
 
       # ── Verify tools 
       - name: Verify tools
