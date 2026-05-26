@@ -78,6 +78,12 @@ jobs:
           yt-dlp --version
 
       # ── Run sync ──────────────────────────────────────────────────────────────
+      - name: Debug secrets
+        run: |
+          echo "R2_ENDPOINT set: ${{ secrets.R2_ENDPOINT != '' }}"
+          echo "R2_ACCESS_KEY set: ${{ secrets.R2_ACCESS_KEY != '' }}"
+          echo "R2_SECRET_KEY set: ${{ secrets.R2_SECRET_KEY != '' }}"
+          echo "R2_BUCKET set: ${{ secrets.R2_BUCKET != '' }}"
       - name: Sync playlists to R2
         working-directory: downloader
         env:
