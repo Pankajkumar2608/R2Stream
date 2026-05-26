@@ -158,7 +158,7 @@ async function extractPlaylistEntries(url: string): Promise<PlaylistEntry[]> {
     return [];
   }
  
-  // ── Playlist ─
+  //  Playlist ─
   log.info(`Extracting playlist: ${url}`);
   const result = await ytdlp([
     "--flat-playlist",           // fast: list entries without downloading
