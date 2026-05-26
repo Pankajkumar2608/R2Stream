@@ -1,0 +1,90 @@
+name: Music Sync
+
+on:
+  schedule:
+    - cron: "0 2 * * *"    # daily at 2 AM UTC
+  workflow_dispatch:
+    inputs:
+      playlist_urls:
+        description: "Playlist URLs to sync (one per line)"
+        required: false
+        type: string
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Node ─────────────────────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: downloader/package-lock.json
+
+      # ── npm install ───────────────────────────────────────────────────────────
+      - name: Install dependencies
+        run: npm ci
+        working-directory: downloader
+
+      # ── Cache ffmpeg ──────────────────────────────────────────────────────────
+      - name: Cache ffmpeg
+        id: cache-ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: ~/ffmpeg
+          key: ffmpeg-7.1-linux-amd64
+
+      - name: Install ffmpeg (first run only)
+        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/ffmpeg
+          cd ~/ffmpeg
+          wget -q https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz
+          tar -xf ffmpeg-master-latest-linux64-gpl.tar.xz --strip-components=2 --wildcards '*/bin/ffmpeg' '*/bin/ffprobe'
+          chmod +x ffmpeg ffprobe
+
+      - name: Add ffmpeg to PATH
+        run: echo "$HOME/ffmpeg" >> $GITHUB_PATH
+
+      # ── Cache yt-dlp ─────────────────────────────────────────────────────────
+      - name: Cache yt-dlp
+        id: cache-ytdlp
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/yt-dlp
+          key: yt-dlp-2026
+
+      - name: Install yt-dlp (first run only)
+        if: steps.cache-ytdlp.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.local/bin
+          curl -sL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o ~/.local/bin/yt-dlp
+          chmod +x ~/.local/bin/yt-dlp
+
+      - name: Add yt-dlp to PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      # ── Verify tools ──────────────────────────────────────────────────────────
+      - name: Verify tools
+        run: |
+          node --version
+          ffmpeg -version | head -1
+          yt-dlp --version
+
+      # ── Run sync ──────────────────────────────────────────────────────────────
+      - name: Sync playlists to R2
+        working-directory: downloader
+        env:
+          R2_ENDPOINT:   ${{ secrets.R2_ENDPOINT }}
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
+          R2_BUCKET:     ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+          PLAYLIST_URLS: ${{ inputs.playlist_urls || secrets.PLAYLIST_URLS }}
+        run: npm run sync
