@@ -83,12 +83,14 @@ jobs:
           echo "${{ secrets.YOUTUBE_COOKIES_B64 }}" | base64 --decode > /tmp/cookies.txt
 
       # ── Run sync 
-      - name: Debug secrets
+      - name: Debug cookies
         run: |
-          echo "R2_ENDPOINT set: ${{ secrets.R2_ENDPOINT != '' }}"
-          echo "R2_ACCESS_KEY set: ${{ secrets.R2_ACCESS_KEY != '' }}"
-          echo "R2_SECRET_KEY set: ${{ secrets.R2_SECRET_KEY != '' }}"
-          echo "R2_BUCKET set: ${{ secrets.R2_BUCKET != '' }}"
+          echo "Cookie file exists: $(test -f /tmp/cookies.txt && echo YES || echo NO)"
+          echo "Cookie file size: $(wc -c < /tmp/cookies.txt 2>/dev/null || echo 0) bytes"
+          echo "First line: $(head -1 /tmp/cookies.txt 2>/dev/null || echo EMPTY)"
+          echo "YOUTUBE_COOKIES env: $YOUTUBE_COOKIES"
+        env:
+          YOUTUBE_COOKIES: /tmp/cookies.txt"
       - name: Sync playlists to R2
         working-directory: downloader
         env:
@@ -99,4 +101,7 @@ jobs:
           R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
           PLAYLIST_URLS: ${{ inputs.playlist_urls || secrets.PLAYLIST_URLS }}
           YOUTUBE_COOKIES: /tmp/cookies.txt
-        run: npm run sync
+        run: |
+          echo "Cookie path: $YOUTUBE_COOKIES"
+          echo "Cookie exists: $(test -f $YOUTUBE_COOKIES && echo YES || echo NO)"
+          npm run sync
