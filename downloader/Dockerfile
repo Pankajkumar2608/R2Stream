@@ -1,22 +1,20 @@
 FROM node:22-alpine
 
-# Install system deps
+# Install dependencies
 RUN apk add --no-cache \
     ffmpeg \
     python3 \
     py3-pip \
     curl \
-    unzip \
     bash
 
 # Install yt-dlp
-RUN pip3 install yt-dlp --break-system-packages
+RUN pip3 install yt-dlp
 
-# Install Deno
-RUN curl -fsSL https://deno.land/install.sh | sh && \
-    mv /root/.deno/bin/deno /usr/local/bin/deno
+# Install Deno (official Alpine package)
+RUN apk add --no-cache deno
 
-# Verify tools
+# Verify installs
 RUN yt-dlp --version && \
     ffmpeg -version | head -1 && \
     deno --version
