@@ -4,8 +4,10 @@
   "description": "Music playlist → Cloudflare R2 sync",
   "type": "module",
   "scripts": {
-    "dev": "tsx sync.ts",
-    "typecheck": "tsc --noEmit"
+    "dev": "tsx watch sync.ts",
+    "start": "tsx sync.ts",
+    "build": "tsc",
+    "start:prod": "node dist/sync.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1053.0",
