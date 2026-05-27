@@ -29,11 +29,18 @@ function cookieArgs(): string[] {
 
 /** Run yt-dlp, log stderr on failure */
 async function ytdlp(args: string[]) {
-  const result = await execa("yt-dlp", args, {
-    reject: false,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const result = await execa(
+    "yt-dlp",
+    [
+      "--no-check-certificates", // fix SSL issues on Render/proxied environments
+      ...args,
+    ],
+    {
+      reject: false,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
   if (result.exitCode !== 0 && result.stderr) {
     log(`[yt-dlp err] ${result.stderr.slice(0, 300)}`);
   }
