@@ -12,26 +12,19 @@ export interface Track {
   added: string;
 }
 
-export interface FailedTrack {
-  title: string;
-  error: string;
-  attempted: string;
-}
-
 export interface Manifest {
   lastUpdated: string | null;
   trackCount: number;
   tracks: Record<string, Track>;
-  failed: Record<string, FailedTrack>;
+  failed: Record<string, { title: string; error: string; attempted: string }>;
 }
 
-export interface PlaylistEntry {
-  id: string;
-  title: string;
-  url?: string;
-  uploader?: string;
-  artist?: string;
-  album?: string;
-  duration?: number;
-  webpage_url?: string;
+export interface DownloadJob {
+  url: string;
+  jobId: string;
+  status: "pending" | "downloading" | "uploading" | "done" | "failed";
+  track?: Track;
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
 }

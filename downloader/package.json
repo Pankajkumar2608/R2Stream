@@ -4,16 +4,20 @@
   "description": "Music playlist → Cloudflare R2 sync",
   "type": "module",
   "scripts": {
-    "sync": "tsx sync.ts",
+    "dev": "tsx sync.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.600.0",
+    "@aws-sdk/client-s3": "^3.1053.0",
+    "@aws-sdk/lib-storage": "^3.1053.0",
+    "dotenv": "^17.4.2",
     "execa": "^9.3.0",
+    "express": "^5.2.1",
     "tsx": "^4.15.0",
     "typescript": "^5.4.0"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^25.9.1"
   }
 }
