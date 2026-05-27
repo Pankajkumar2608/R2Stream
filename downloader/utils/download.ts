@@ -56,7 +56,10 @@ export async function extractMeta(url: string): Promise<VideoMeta | null> {
     "--no-playlist",
     "--dump-single-json",
     "--skip-download",
+    "--ignore-errors",
     "--no-warnings",
+    "--format",
+    "bestaudio/best/worst", // broad fallback so format check passes
     ...cookieArgs(),
     url,
   ]);
@@ -162,7 +165,7 @@ export async function downloadTrack(meta: VideoMeta): Promise<Track | null> {
     // ── yt-dlp download ───────────────────────────────────────────────────────
     const dlResult = await ytdlp([
       "--format",
-      "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
+      "bestaudio/best/worst",
       "--extract-audio",
       "--audio-format",
       config.download.audioFormat,

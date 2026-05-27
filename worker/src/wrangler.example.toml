@@ -1,0 +1,15 @@
+name = "musync-api"
+main = "src/index.ts"
+compatibility_date = "2024-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ── R2 Bucket binding ─────────────────────────────────────────────────────────
+[[r2_buckets]]
+binding  = "BUCKET"       # accessed as env.BUCKET in code
+bucket_name = "YOUR_BUCKET_NAME"   # replace with your actual bucket name
+
+# ── Secrets (set via: wrangler secret put SECRET_NAME) ───────────────────────
+# GITHUB_TOKEN   — Personal Access Token with actions:write scope
+# GITHUB_OWNER   — your GitHub username
+# GITHUB_REPO    — repo name where sync workflow lives
+# R2_PUBLIC_URL  — https://your-bucket.r2.dev  (or custom domain)
