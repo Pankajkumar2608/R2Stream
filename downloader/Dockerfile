@@ -1,6 +1,5 @@
 FROM node:22-alpine
 
-# Install dependencies
 RUN apk add --no-cache \
     ffmpeg \
     python3 \
@@ -8,16 +7,10 @@ RUN apk add --no-cache \
     curl \
     bash
 
-# Install yt-dlp
-RUN pip3 install yt-dlp
+RUN python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir yt-dlp
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Install Deno (official Alpine package)
-RUN apk add --no-cache deno
-
-# Verify installs
-RUN yt-dlp --version && \
-    ffmpeg -version | head -1 && \
-    deno --version
 
 WORKDIR /app
 
@@ -26,6 +19,7 @@ RUN npm ci --omit=dev
 
 COPY . .
 
-EXPOSE 3000
+RUN yt-dlp --version && ffmpeg -version | head -1
 
+EXPOSE 3000
 CMD ["npm", "start"]
