@@ -21,6 +21,12 @@ function log(msg: string) {
   console.log(`${new Date().toTimeString().slice(0, 8)} ${msg}`);
 }
 
+/** Returns --cookies flag if YOUTUBE_COOKIES env is set */
+function cookieArgs(): string[] {
+  const p = process.env.YOUTUBE_COOKIES;
+  return p ? ["--cookies", p] : [];
+}
+
 /** Run yt-dlp, log stderr on failure */
 async function ytdlp(args: string[]) {
   const result = await execa("yt-dlp", args, {
@@ -51,6 +57,7 @@ export async function extractMeta(url: string): Promise<VideoMeta | null> {
     "--dump-single-json",
     "--skip-download",
     "--no-warnings",
+    ...cookieArgs(),
     url,
   ]);
 
@@ -87,6 +94,7 @@ export async function extractPlaylist(url: string): Promise<VideoMeta[]> {
     "--no-warnings",
     "--print-json",
     "--quiet",
+    ...cookieArgs(),
     url,
   ]);
 
@@ -167,6 +175,7 @@ export async function downloadTrack(meta: VideoMeta): Promise<Track | null> {
       "5",
       "--no-warnings",
       "--quiet",
+      ...cookieArgs(),
       "--output",
       join(tmpDir, "%(id)s.%(ext)s"),
       meta.url,

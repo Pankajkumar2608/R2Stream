@@ -1,28 +1,53 @@
 import express from "express";
 import { randomUUID } from "crypto";
-import { config } from "./utils/config";
+import { writeFileSync } from "fs";
+import { config } from "./config.js";
 import {
   extractMeta,
   extractPlaylist,
   isPlaylist,
   downloadTrack,
   type VideoMeta,
-} from "./utils/download";
-import { makeR2Client, loadManifest } from "./utils/r2";
-import type { DownloadJob } from "./utils/types";
+} from "./download.js";
+import { makeR2Client, loadManifest } from "./r2.js";
+import type { DownloadJob } from "./types.js";
+
+// ── Write YouTube cookies from env var on startup ─────────────────────────────
+
+const COOKIE_PATH = "/tmp/yt-cookies.txt";
+
+function setupCookies(): void {
+  const b64 = process.env.YOUTUBE_COOKIES_B64;
+  if (!b64) {
+    console.log(
+      "⚠  No YOUTUBE_COOKIES_B64 set — downloads may fail on restricted videos",
+    );
+    return;
+  }
+  try {
+    const decoded = Buffer.from(b64, "base64").toString("utf-8");
+    writeFileSync(COOKIE_PATH, decoded, "utf-8");
+    process.env.YOUTUBE_COOKIES = COOKIE_PATH;
+    console.log(`✓  YouTube cookies written to ${COOKIE_PATH}`);
+  } catch (err) {
+    console.error("✗  Failed to write cookies:", err);
+  }
+}
+
+setupCookies();
 
 const app = express();
 app.use(express.json());
 
-// ── In-memory job queue 
+// ── In-memory job queue ───────────────────────────────────────────────────────
 // Jobs are processed one at a time to avoid overloading the free instance.
-// State resets on restart
+// State resets on restart — fine for personal use.
 
 const jobs = new Map<string, DownloadJob>();
 const queue: string[] = []; // jobIds waiting to run
 let running = false;
 
-// ── Auth middleware (optional) 
+// ── Auth middleware (optional) ────────────────────────────────────────────────
 
 function auth(
   req: express.Request,
@@ -41,7 +66,7 @@ function auth(
   next();
 }
 
-// ── Process queue sequentially 
+// ── Process queue sequentially ────────────────────────────────────────────────
 
 async function processQueue() {
   if (running || queue.length === 0) return;
@@ -126,7 +151,7 @@ async function processQueue() {
   running = false;
 }
 
-// ── Routes 
+// ── Routes ────────────────────────────────────────────────────────────────────
 
 // GET / — health check
 app.get("/", (_req, res) => {
@@ -217,7 +242,7 @@ app.get("/status", auth, async (_req, res) => {
   }
 });
 
-// ── Start 
+// ── Start ─────────────────────────────────────────────────────────────────────
 
 app.listen(config.port, () => {
   console.log(`\n🎵 musync-downloader running on port ${config.port}`);
