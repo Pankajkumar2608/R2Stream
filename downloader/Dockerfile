@@ -1,30 +1,22 @@
-FROM node:22-slim
+FROM node:22-alpine
 
-# Install yt-dlp and ffmpeg
-RUN apt-get update && apt-get install -y \
+# Install ffmpeg, python3, pip
+RUN apk add --no-cache \
     ffmpeg \
     python3 \
-    curl \
-    --no-install-recommends && \
-    # Install latest yt-dlp binary
-    curl -sL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-    -o /usr/local/bin/yt-dlp && \
-    chmod +x /usr/local/bin/yt-dlp && \
-    # Cleanup
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    py3-pip
+
+# Install yt-dlp via pip
+RUN pip3 install yt-dlp --break-system-packages
 
 WORKDIR /app
 
-# Install dependencies
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-# Copy source
 COPY . .
 
-# Verify tools
 RUN yt-dlp --version && ffmpeg -version | head -1
 
 EXPOSE 3000
-
 CMD ["npm", "start"]
