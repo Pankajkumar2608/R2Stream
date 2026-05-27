@@ -9,18 +9,17 @@ RUN apk add --no-cache \
     unzip \
     bash
 
-# Install yt-dlp via pip
+# Install yt-dlp
 RUN pip3 install yt-dlp --break-system-packages
 
-# Install Deno via direct binary (Alpine needs musl build)
-RUN curl -fsSL https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-musl.zip \
-    -o /tmp/deno.zip && \
-    unzip /tmp/deno.zip -d /usr/local/bin && \
-    chmod +x /usr/local/bin/deno && \
-    rm /tmp/deno.zip
+# Install Deno
+RUN curl -fsSL https://deno.land/install.sh | sh && \
+    mv /root/.deno/bin/deno /usr/local/bin/deno
 
 # Verify tools
-RUN yt-dlp --version && ffmpeg -version | head -1 && deno --version
+RUN yt-dlp --version && \
+    ffmpeg -version | head -1 && \
+    deno --version
 
 WORKDIR /app
 
@@ -30,4 +29,5 @@ RUN npm ci --omit=dev
 COPY . .
 
 EXPOSE 3000
+
 CMD ["npm", "start"]

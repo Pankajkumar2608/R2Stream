@@ -5,7 +5,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { createReadStream } from "fs";
 import { config } from "./config.js";
-import type { Manifest, Track } from "./types.js";
+import type { Manifest, Track } from "./type";
 
 // ── R2 Client ─────────────────────────────────────────────────────────────────
 

@@ -5,9 +5,9 @@ import { statSync } from "fs";
 import { execa } from "execa";
 import { config } from "./config.js";
 import { makeR2Client, loadManifest, saveManifest, uploadFile } from "./r2.js";
-import type { Track } from "./types.js";
+import type { Track } from "./type";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ───
 
 function safeFilename(text: string, maxLen = 80): string {
   return text
@@ -53,7 +53,7 @@ async function ytdlp(args: string[]) {
   return result;
 }
 
-// ── Extract metadata for a single video ──────────────────────────────────────
+// ── Extract metadata for a single video ──
 
 export interface VideoMeta {
   id: string;
@@ -100,7 +100,7 @@ export async function extractMeta(url: string): Promise<VideoMeta | null> {
   }
 }
 
-// ── Extract all entries from a playlist URL ───────────────────────────────────
+// ── Extract all entries from a playlist URL ─────
 
 export async function extractPlaylist(url: string): Promise<VideoMeta[]> {
   const result = await ytdlp([
@@ -142,7 +142,7 @@ export async function extractPlaylist(url: string): Promise<VideoMeta[]> {
   return entries;
 }
 
-// ── Detect if URL is a playlist ───────────────────────────────────────────────
+// ── Detect if URL is a playlist ─────
 
 export function isPlaylist(url: string): boolean {
   try {
@@ -153,7 +153,7 @@ export function isPlaylist(url: string): boolean {
   }
 }
 
-// ── Download one track and upload to R2 ──────────────────────────────────────
+// ── Download one track and upload to R2 ──
 
 export async function downloadTrack(meta: VideoMeta): Promise<Track | null> {
   const r2 = makeR2Client();
@@ -175,7 +175,7 @@ export async function downloadTrack(meta: VideoMeta): Promise<Track | null> {
   const tmpDir = await mkdtemp(join(tmpdir(), `musync-${meta.id}-`));
 
   try {
-    // ── yt-dlp download ───────────────────────────────────────────────────────
+    // ── yt-dlp download ───
     const dlResult = await ytdlp([
       "--format",
       "bestaudio/best/worst",
@@ -202,7 +202,7 @@ export async function downloadTrack(meta: VideoMeta): Promise<Track | null> {
       return null;
     }
 
-    // ── Find downloaded files ─────────────────────────────────────────────────
+    // ── Find downloaded files ─
     const files = await readdir(tmpDir);
     const audioFile = files.find((f) =>
       f.endsWith(`.${config.download.audioFormat}`),
@@ -217,7 +217,7 @@ export async function downloadTrack(meta: VideoMeta): Promise<Track | null> {
     const audioPath = join(tmpDir, audioFile);
     const coverPath = coverFile ? join(tmpDir, coverFile) : null;
 
-    // ── Upload audio ──────────────────────────────────────────────────────────
+    // ── Upload audio 
     // S3 metadata headers only allow ASCII printable chars — encode everything
     const cleanMeta = (s: string) => encodeURIComponent(s).slice(0, 200); // URI-encode + cap length
 
@@ -230,7 +230,7 @@ export async function downloadTrack(meta: VideoMeta): Promise<Track | null> {
     });
     log(`✓ Uploaded: ${filename} (${Math.round(sizeBytes / 1024)} KB)`);
 
-    // ── Upload cover ──────────────────────────────────────────────────────────
+    // ── Upload cover 
     let coverUploaded = false;
     if (coverPath) {
       try {
@@ -249,7 +249,7 @@ export async function downloadTrack(meta: VideoMeta): Promise<Track | null> {
       }
     }
 
-    // ── Build track object ────────────────────────────────────────────────────
+    // ── Build track object 
     const base = config.r2.publicUrl;
     const track: Track = {
       id: meta.id,
@@ -265,7 +265,7 @@ export async function downloadTrack(meta: VideoMeta): Promise<Track | null> {
       added: new Date().toISOString().slice(0, 10),
     };
 
-    // ── Update manifest ───────────────────────────────────────────────────────
+    // ── Update manifest ───
     const manifest = await loadManifest(r2);
     manifest.tracks[track.id] = track;
     await saveManifest(r2, manifest);
