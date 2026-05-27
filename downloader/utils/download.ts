@@ -32,13 +32,19 @@ async function ytdlp(args: string[]) {
   const result = await execa(
     "yt-dlp",
     [
-      "--no-check-certificates", // fix SSL issues on Render/proxied environments
+      "--no-check-certificates", // fix SSL on Render
+      "--js-runtimes",
+      "deno", // explicitly use Deno for YouTube JS parsing
       ...args,
     ],
     {
       reject: false,
       stdout: "pipe",
       stderr: "pipe",
+      env: {
+        ...process.env,
+        PATH: `${process.env.DENO_INSTALL ?? "/root/.deno"}/bin:${process.env.PATH}`,
+      },
     },
   );
   if (result.exitCode !== 0 && result.stderr) {
