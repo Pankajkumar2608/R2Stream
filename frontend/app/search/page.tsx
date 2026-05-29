@@ -1,12 +1,13 @@
 "use client"
 
+import { Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { useSearch } from "@/hooks/useApi"
 import { usePlayerStore } from "@/store/usePlayerStore"
 import { TrackCard } from "@/components/TrackCard"
 import { Loader2, SearchX, Search } from "lucide-react"
 
-export default function SearchPage() {
+function SearchContent() {
   const searchParams = useSearchParams()
   const q = searchParams.get('q') || ''
   
@@ -19,7 +20,7 @@ export default function SearchPage() {
   }
 
   return (
-    <div className="p-6 md:p-10 max-w-[1600px] mx-auto">
+    <>
       <div className="mb-10">
         <h1 className="text-4xl md:text-5xl font-black tracking-tight text-white flex items-center gap-4">
           <Search size={40} className="text-primary opacity-80" />
@@ -59,6 +60,21 @@ export default function SearchPage() {
           ))}
         </div>
       )}
+    </>
+  )
+}
+
+export default function SearchPage() {
+  return (
+    <div className="p-6 md:p-10 max-w-[1600px] mx-auto">
+      <Suspense fallback={
+        <div className="flex flex-col items-center justify-center h-64 text-primary gap-4">
+          <Loader2 className="animate-spin text-primary" size={40} />
+          <p className="text-white/40 font-medium">Loading search...</p>
+        </div>
+      }>
+        <SearchContent />
+      </Suspense>
     </div>
   )
 }
