@@ -159,9 +159,9 @@ async function processDownloads(urls: string[], env: Env) {
         };
 
         await saveManifest(env, manifest);
-        console.log(`[SUCCESS] ✅ "${song.title}" added to library! (Total: ${Object.keys(manifest.tracks).length})`);
+        console.log(`[SUCCESS] "${song.title}" added to library! (Total: ${Object.keys(manifest.tracks).length})`);
       } catch (err: any) {
-        console.error(`[FAIL] ❌ "${song.title}": ${err.message}`);
+        console.error(`[FAIL] "${song.title}": ${err.message}`);
         manifest.failed = manifest.failed || {};
         manifest.failed[trackId] = {
           title: song.title,

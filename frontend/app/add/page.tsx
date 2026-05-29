@@ -22,7 +22,7 @@ export default function AddMusicPage() {
     
     // Capture the initial track count before submitting
     if (libraryStatus) {
-      setInitialTrackCount(libraryStatus.totalTracks)
+      setInitialTrackCount(libraryStatus.trackCount)
     }
 
     try {
@@ -42,7 +42,7 @@ export default function AddMusicPage() {
         const newData = await refreshStatus()
         
         // If track count increased, we assume it finished
-        if (newData && initialTrackCount !== null && newData.totalTracks > initialTrackCount) {
+        if (newData && initialTrackCount !== null && newData.trackCount > initialTrackCount) {
           setStatus("success")
           clearInterval(interval)
         }
