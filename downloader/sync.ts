@@ -1,275 +1,547 @@
-import express from "express";
-import { randomUUID } from "crypto";
-import { writeFileSync } from "fs";
-import { config } from "./utils/config";
+/**
+ * Downloads songs from YouTube/Spotify playlists → uploads to Cloudflare R2
+ * Tracks state via manifest.json stored in R2 (no DB needed)
+ */
+
+import { readFileSync } from "fs";
+import { rm, readdir } from "fs/promises";
+import { tmpdir } from "os";
+import { join, extname } from "path";
+import { createReadStream, statSync } from "fs";
+import { mkdtemp } from "fs/promises";
+
 import {
-  extractMeta,
-  extractPlaylist,
-  isPlaylist,
-  downloadTrack,
-  type VideoMeta,
-} from "./utils/download";
-import { makeR2Client, loadManifest } from "./utils/r2";
-import type { DownloadJob } from "./utils/type";
+  S3Client,
+  GetObjectCommand,
+  PutObjectCommand,
+  type GetObjectCommandOutput,
+} from "@aws-sdk/client-s3";
+import { execa } from "execa";
 
-const COOKIE_PATH = "/tmp/yt-cookies.txt";
+// ── Config 
 
-function setupCookies(): void {
-  const b64 = process.env.YOUTUBE_COOKIES_B64;
-  if (!b64) {
-    console.log(
-      "⚠  No YOUTUBE_COOKIES_B64 set — downloads may fail on restricted videos",
-    );
-    return;
-  }
+const config = {
+  r2: {
+    endpoint: requireEnv("R2_ENDPOINT"),
+    accessKey: requireEnv("R2_ACCESS_KEY"),
+    secretKey: requireEnv("R2_SECRET_KEY"),
+    bucket: requireEnv("R2_BUCKET"),
+    publicUrl: process.env.R2_PUBLIC_URL?.replace(/\/$/, "") ?? "",
+  },
+  keys: {
+    manifest: "manifest.json",
+    music: "music/",
+    covers: "covers/",
+  },
+  download: {
+    maxWorkers: 3, // parallel downloads
+    audioFormat: "mp3",
+    audioQuality: "320",
+  },
+} as const;
+
+function requireEnv(key: string): string {
+  const val = process.env[key];
+  if (!val) throw new Error(`Missing required env var: ${key}`);
+  return val;
+}
+
+// ── Types ─
+
+interface Track {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  fileKey: string;
+  coverKey: string | null;
+  fileUrl: string | null;
+  coverUrl: string | null;
+  sizeBytes: number;
+  added: string;
+}
+
+interface FailedTrack {
+  title: string;
+  error: string;
+  attempted: string;
+}
+
+interface Manifest {
+  lastUpdated: string | null;
+  trackCount: number;
+  tracks: Record<string, Track>;
+  failed: Record<string, FailedTrack>;
+}
+
+interface PlaylistEntry {
+  id: string;
+  title: string;
+  url?: string;
+  uploader?: string;
+  artist?: string;
+  album?: string;
+  duration?: number;
+  webpage_url?: string;
+}
+
+// ── Logger 
+
+const log = {
+  info: (msg: string) => console.log(`${time()} [INFO]  ${msg}`),
+  ok: (msg: string) => console.log(`${time()} [✓]     ${msg}`),
+  warn: (msg: string) => console.warn(`${time()} [WARN]  ${msg}`),
+  error: (msg: string) => console.error(`${time()} [✗]     ${msg}`),
+};
+
+function time(): string {
+  return new Date().toTimeString().slice(0, 8);
+}
+
+// ── R2 Client 
+
+function makeR2Client(): S3Client {
+  return new S3Client({
+    endpoint: config.r2.endpoint,
+    region: "auto",
+    credentials: {
+      accessKeyId: config.r2.accessKey,
+      secretAccessKey: config.r2.secretKey,
+    },
+    forcePathStyle: true,
+  });
+}
+
+// ── Manifest ─
+
+async function loadManifest(r2: S3Client): Promise<Manifest> {
   try {
-    const decoded = Buffer.from(b64, "base64").toString("utf-8");
-    writeFileSync(COOKIE_PATH, decoded, "utf-8");
-    process.env.YOUTUBE_COOKIES = COOKIE_PATH;
-    console.log(`✓  YouTube cookies written to ${COOKIE_PATH}`);
-  } catch (err) {
-    console.error("✗  Failed to write cookies:", err);
+    const resp: GetObjectCommandOutput = await r2.send(
+      new GetObjectCommand({
+        Bucket: config.r2.bucket,
+        Key: config.keys.manifest,
+      }),
+    );
+    const body = await resp.Body!.transformToString("utf-8");
+    const data = JSON.parse(body) as Manifest;
+    log.info(
+      `Manifest loaded — ${Object.keys(data.tracks).length} tracks in library`,
+    );
+    return data;
+  } catch (err: any) {
+    if (err?.name === "NoSuchKey" || err?.$metadata?.httpStatusCode === 404) {
+      log.info("No manifest found — starting fresh");
+      return { lastUpdated: null, trackCount: 0, tracks: {}, failed: {} };
+    }
+    throw err;
   }
 }
 
-setupCookies();
+async function saveManifest(r2: S3Client, manifest: Manifest): Promise<void> {
+  manifest.lastUpdated = new Date().toISOString();
+  manifest.trackCount = Object.keys(manifest.tracks).length;
 
-const app = express();
-app.use(express.json());
-
-// ── In-memory job queue ───────────────────────────────────────────────────────
-// Jobs are processed one at a time to avoid overloading the free instance.
-// State resets on restart — fine for personal use.
-
-const jobs = new Map<string, DownloadJob>();
-const queue: string[] = []; // jobIds waiting to run
-let running = false;
-
-// ── Auth middleware (optional) ────────────────────────────────────────────────
-
-function auth(
-  req: express.Request,
-  res: express.Response,
-  next: express.NextFunction,
-) {
-  if (!config.apiKey) return next(); // no key set = open
-
-  const header = req.headers.authorization ?? "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : header;
-
-  if (token !== config.apiKey) {
-    res.status(401).json({ ok: false, error: "Unauthorized" });
-    return;
-  }
-  next();
+  await r2.send(
+    new PutObjectCommand({
+      Bucket: config.r2.bucket,
+      Key: config.keys.manifest,
+      Body: JSON.stringify(manifest, null, 2),
+      ContentType: "application/json",
+      CacheControl: "no-cache",
+    }),
+  );
+  log.ok(`Manifest saved — ${manifest.trackCount} tracks total`);
 }
 
-// ── Process queue sequentially ────────────────────────────────────────────────
+// ── Helpers ──
 
-async function processQueue() {
-  if (running || queue.length === 0) return;
-  running = true;
+/** Strip characters unsafe for filenames */
+function safeFilename(text: string, maxLen = 80): string {
+  return text
+    .replace(/[^\w\s\-.'()]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLen);
+}
 
-  while (queue.length > 0) {
-    const jobId = queue.shift()!;
-    const job = jobs.get(jobId);
-    if (!job) continue;
+/** Run a yt-dlp command and return result */
+async function ytdlp(args: string[]): Promise<any> {
+  const result = await execa("yt-dlp", args, {
+    reject: false,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0 && result.stderr) {
+    log.error("yt-dlp stderr: " + result.stderr.slice(0, 500));
+  }
+  return result;
+}
 
-    job.status = "downloading";
-    console.log(`\n[job:${jobId.slice(0, 8)}] Starting: ${job.url}`);
+/** Returns extra args for yt-dlp — cookies only if explicitly set */
+function cookieArgs(): string[] {
+  const args: string[] = [];
+
+  // Only use cookies if explicitly provided — not required for local runs(use cookies if u want to host it as a service)
+  const cookiePath = process.env.YOUTUBE_COOKIES;
+  if (cookiePath) {
+    args.push("--cookies", cookiePath);
+  }
+
+  return args;
+}
+
+/** Pool: run tasks with limited concurrency */
+async function pool<T>(
+  items: T[],
+  worker: (item: T) => Promise<void>,
+  concurrency: number,
+): Promise<void> {
+  const queue = [...items];
+  const workers = Array.from({ length: concurrency }, async () => {
+    while (queue.length > 0) {
+      const item = queue.shift()!;
+      await worker(item);
+    }
+  });
+  await Promise.all(workers);
+}
+
+// ── Playlist Extraction ───────────────────────────────────────────────────────
+
+/** Detect if URL is a single video or a playlist */
+function isPlaylistUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const list = u.searchParams.get("list");
+    // Has a list param AND it's not just a mix/radio (RD prefix = YouTube radio)
+    // We treat ALL list= params as playlists — RD playlists are valid too
+    if (list) return true;
+  } catch {
+    /* invalid URL */
+  }
+
+  return (
+    url.includes("/sets/") || // SoundCloud
+    url.includes("music.youtube.com/playlist") // YT Music
+  );
+}
+
+async function extractPlaylistEntries(url: string): Promise<PlaylistEntry[]> {
+  // ── Single video ────────────────────────────────────────────────────────────
+  if (!isPlaylistUrl(url)) {
+    log.info(`Single video: ${url}`);
+    const result = await ytdlp([
+      "--no-playlist",
+      "--dump-single-json",
+      "--no-warnings",
+      "--ignore-errors",
+      "--skip-download", // metadata only, no format check needed
+      ...cookieArgs(),
+      url,
+    ]);
+
+    const singleOut = (result.stdout ?? result.all ?? "").toString().trim();
+    if (result.exitCode !== 0 || !singleOut) {
+      log.warn(`Could not extract video info: ${url}`);
+      return [];
+    }
 
     try {
-      // 1. Extract metadata
-      let meta: VideoMeta | null = null;
-
-      if (isPlaylist(job.url)) {
-        // For playlists, process all tracks — but report job as done after all
-        job.status = "downloading";
-        const entries = await extractPlaylist(job.url);
-        console.log(
-          `[job:${jobId.slice(0, 8)}] Playlist has ${entries.length} tracks`,
-        );
-
-        // Load existing manifest to skip already-downloaded tracks
-        const r2 = makeR2Client();
-        const manifest = await loadManifest(r2);
-        const existing = new Set(Object.keys(manifest.tracks));
-        const newTracks = entries.filter((e) => !existing.has(e.id));
-
-        console.log(
-          `[job:${jobId.slice(0, 8)}] ${newTracks.length} new tracks to download`,
-        );
-
-        let lastTrack = null;
-        for (const entry of newTracks) {
-          job.status = "downloading";
-          const track = await downloadTrack(entry);
-          if (track) lastTrack = track;
-        }
-
-        job.status = "done";
-        job.track = lastTrack ?? undefined;
-        job.finishedAt = new Date().toISOString();
-      } else {
-        // Single video
-        meta = await extractMeta(job.url);
-        if (!meta) throw new Error("Could not extract video metadata");
-
-        // Check if already exists
-        const r2 = makeR2Client();
-        const manifest = await loadManifest(r2);
-        if (manifest.tracks[meta.id]) {
-          console.log(
-            `[job:${jobId.slice(0, 8)}] Already exists: ${meta.title}`,
-          );
-          job.status = "done";
-          job.track = manifest.tracks[meta.id];
-          job.finishedAt = new Date().toISOString();
-          continue;
-        }
-
-        job.status = "uploading";
-        const track = await downloadTrack(meta);
-        if (!track) throw new Error("Download or upload failed");
-
-        job.status = "done";
-        job.track = track;
-        job.finishedAt = new Date().toISOString();
+      const entry = JSON.parse(singleOut) as PlaylistEntry;
+      if (entry.id) {
+        log.info(`Found 1 track: ${entry.title}`);
+        return [entry];
       }
+    } catch {
+      log.warn(`Failed to parse video info for: ${url}`);
+    }
+    return [];
+  }
 
-      console.log(`[job:${jobId.slice(0, 8)}] ✓ Done`);
-    } catch (err: any) {
-      job.status = "failed";
-      job.error = err?.message ?? "Unknown error";
-      job.finishedAt = new Date().toISOString();
-      console.error(`[job:${jobId.slice(0, 8)}] ✗ Failed: ${job.error}`);
+  // ── Playlist ────────────────────────────────────────────────────────────────
+  log.info(`Extracting playlist: ${url}`);
+  const result = await ytdlp([
+    "--flat-playlist", // fast: list entries without downloading
+    "--yes-playlist", // expand playlist even if URL has watch?v=
+    "--ignore-errors",
+    "--no-warnings",
+    "--print-json", // one JSON object per line
+    "--quiet",
+    ...cookieArgs(),
+    url,
+  ]);
+
+  if (result.exitCode !== 0 && !result.stdout?.trim()) {
+    log.warn(`Could not extract playlist: ${url}`);
+    return [];
+  }
+
+  const entries: PlaylistEntry[] = [];
+  const rawOut = (result.stdout ?? result.all ?? "").toString();
+  for (const line of rawOut.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const entry = JSON.parse(trimmed) as PlaylistEntry;
+      if (entry.id) entries.push(entry);
+    } catch {
+      // skip malformed lines
     }
   }
 
-  running = false;
+  log.info(`Found ${entries.length} tracks in playlist`);
+  return entries;
 }
 
-// ── Routes ────────────────────────────────────────────────────────────────────
+// ── Download + Upload ─────────────────────────────────────────────────────────
 
-// GET / — health check
-app.get("/", (_req, res) => {
-  res.json({
-    ok: true,
-    service: "musync-downloader",
-    version: "1.0.0",
-    queue: queue.length,
-    running,
-  });
-});
+async function downloadAndUpload(
+  entry: PlaylistEntry,
+  r2: S3Client,
+  manifest: Manifest,
+): Promise<Track | null> {
+  const videoId = entry.id;
+  const rawTitle = entry.title ?? "Unknown Title";
 
-// POST /download — queue a download job
-// Body: { "url": "https://youtube.com/..." }
-app.post("/download", auth, async (req, res) => {
-  const { url } = req.body as { url?: string };
-
-  if (!url || !url.startsWith("http")) {
-    res
-      .status(400)
-      .json({ ok: false, error: "Valid URL required in body: { url }" });
-    return;
-  }
-
-  const jobId: string = randomUUID();
-  const job: DownloadJob = {
-    jobId,
-    url,
-    status: "pending",
-    startedAt: new Date().toISOString(),
-  };
-
-  jobs.set(jobId, job);
-  queue.push(jobId);
-
-  console.log(`[job:${jobId.slice(0, 8)}] Queued: ${url}`);
-
-  // Start processing (non-blocking)
-  processQueue().catch(console.error);
-
-  res.status(202).json({
-    ok: true,
-    jobId,
-    message: "Download queued. Poll /jobs/:jobId for status.",
-    pollUrl: `/jobs/${jobId}`,
-  });
-});
-
-// GET /jobs/:jobId — check job status
-app.get("/jobs/:jobId", auth, (req, res) => {
-  const job = jobs.get(req.params.jobId);
-  if (!job) {
-    res.status(404).json({ ok: false, error: "Job not found" });
-    return;
-  }
-  res.json({ ok: true, job });
-});
-
-// GET /jobs — list recent jobs
-app.get("/jobs", auth, (_req, res) => {
-  const list = Array.from(jobs.values())
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
-    .slice(0, 20);
-  res.json({ ok: true, jobs: list, total: jobs.size });
-});
-
-// GET /debug/cookies — check cookie status (remove after debugging)
-app.get("/debug/cookies", (_req, res) => {
-  const b64 = process.env.YOUTUBE_COOKIES_B64;
-  const cookiePath = process.env.YOUTUBE_COOKIES;
-
-  let fileContents = "";
-  try {
-    if (cookiePath) {
-      const { readFileSync } = require("fs");
-      fileContents = readFileSync(cookiePath, "utf-8").slice(0, 200);
-    }
-  } catch (e: any) {
-    fileContents = `Error reading: ${e.message}`;
-  }
-
-  res.json({
-    b64Set: !!b64,
-    b64Length: b64?.length ?? 0,
-    cookiePath,
-    filePreview: fileContents,
-  });
-});
-
-// GET /status — library stats from R2
-app.get("/status", auth, async (_req, res) => {
-  try {
-    const r2 = makeR2Client();
-    const manifest = await loadManifest(r2);
-    const totalSize = Object.values(manifest.tracks).reduce(
-      (sum, t) => sum + (t.sizeBytes ?? 0),
-      0,
-    );
-
-    res.json({
-      ok: true,
-      trackCount: manifest.trackCount ?? Object.keys(manifest.tracks).length,
-      failedCount: Object.keys(manifest.failed ?? {}).length,
-      lastUpdated: manifest.lastUpdated,
-      totalSizeMB: (totalSize / 1024 / 1024).toFixed(1),
-      queue: queue.length,
-      running,
-    });
-  } catch (err: any) {
-    res.status(500).json({ ok: false, error: err?.message });
-  }
-});
-
-// ── Start ─────────────────────────────────────────────────────────────────────
-
-app.listen(config.port, () => {
-  console.log(`\n🎵 musync-downloader running on port ${config.port}`);
-  console.log(
-    `   Auth: ${config.apiKey ? "enabled" : "disabled (set API_KEY to enable)"}`,
+  // Clean up YouTube "Artist - Topic" channel names
+  let artist = (entry.uploader ?? entry.artist ?? "Unknown Artist").replace(
+    / - Topic$/,
+    "",
   );
-  console.log(`   R2 bucket: ${config.r2.bucket}`);
-  console.log(`   Ready.\n`);
+  const album = entry.album ?? "";
+  const duration = entry.duration ?? 0;
+
+  const safeArtist = safeFilename(artist);
+  // If title already starts with "Artist - ", strip it to avoid "Artist - Artist - Title"
+  const titleWithoutArtist = rawTitle
+    .toLowerCase()
+    .startsWith(artist.toLowerCase() + " - ")
+    ? rawTitle.slice(artist.length + 3)
+    : rawTitle;
+  const safeTitle = safeFilename(titleWithoutArtist);
+  const filename = `${safeArtist} - ${safeTitle}.${config.download.audioFormat}`;
+  const musicKey = `${config.keys.music}${filename}`;
+  const coverKey = `${config.keys.covers}${videoId}.jpg`;
+  const trackUrl =
+    entry.webpage_url ??
+    entry.url ??
+    `https://www.youtube.com/watch?v=${videoId}`;
+
+  log.info(`⬇  Downloading: ${rawTitle}`);
+
+  // Create an isolated temp dir per track so parallel runs don't collide
+  const tmpDir = await mkdtemp(join(tmpdir(), `musync-${videoId}-`));
+
+  try {
+    // ── yt-dlp download ───────────────────────────────────────────────────────
+    const dlResult = await ytdlp([
+      "--format",
+      "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best[height<=480]/best",
+      "--extract-audio",
+      "--audio-format",
+      config.download.audioFormat,
+      "--audio-quality",
+      config.download.audioQuality,
+      "--embed-thumbnail", // embed cover art into MP3
+      "--embed-metadata", // embed ID3 tags
+      "--write-thumbnail", // also write cover as separate file
+      "--concurrent-fragments",
+      "5", // faster fragment downloads
+      "--no-warnings",
+      "--quiet",
+      ...cookieArgs(),
+      "--output",
+      join(tmpDir, "%(id)s.%(ext)s"),
+      trackUrl,
+    ]);
+
+    if (dlResult.exitCode !== 0) {
+      log.error(
+        `Download failed [${rawTitle}]: ${dlResult.stderr?.slice(0, 200)}`,
+      );
+      return null;
+    }
+
+    // ── Find downloaded files ─────────────────────────────────────────────────
+    const files = await readdir(tmpDir);
+    const audioFile = files.find((f) =>
+      f.endsWith(`.${config.download.audioFormat}`),
+    );
+    const coverFile = files.find((f) => /\.(jpg|jpeg|webp|png)$/i.test(f));
+
+    if (!audioFile) {
+      log.error(`MP3 not found after download [${rawTitle}]`);
+      return null;
+    }
+
+    const audioPath = join(tmpDir, audioFile);
+    const coverPath = coverFile ? join(tmpDir, coverFile) : null;
+    const sizeBytes = statSync(audioPath).size;
+
+    // ── Upload audio to R2 ────────────────────────────────────────────────────
+    await r2.send(
+      new PutObjectCommand({
+        Bucket: config.r2.bucket,
+        Key: musicKey,
+        Body: createReadStream(audioPath),
+        ContentType: "audio/mpeg",
+        CacheControl: "public, max-age=31536000",
+        Metadata: {
+          title: rawTitle,
+          artist: artist,
+          album: album,
+          duration: String(duration),
+          videoId: videoId,
+        },
+      }),
+    );
+    log.ok(`Uploaded audio: ${filename} (${Math.round(sizeBytes / 1024)} KB)`);
+
+    // ── Upload cover art to R2 ────────────────────────────────────────────────
+    let coverUploaded = false;
+    if (coverPath) {
+      try {
+        const ext = extname(coverPath).toLowerCase();
+        const ctype =
+          ext === ".webp"
+            ? "image/webp"
+            : ext === ".png"
+              ? "image/png"
+              : "image/jpeg";
+
+        await r2.send(
+          new PutObjectCommand({
+            Bucket: config.r2.bucket,
+            Key: coverKey,
+            Body: createReadStream(coverPath),
+            ContentType: ctype,
+            CacheControl: "public, max-age=31536000",
+          }),
+        );
+        coverUploaded = true;
+        log.ok(`Uploaded cover: ${coverKey}`);
+      } catch {
+        log.warn(`Cover upload failed for ${videoId}`);
+      }
+    }
+
+    // ── Build track metadata ──────────────────────────────────────────────────
+    const base = config.r2.publicUrl;
+    const track: Track = {
+      id: videoId,
+      title: rawTitle,
+      artist,
+      album,
+      duration,
+      fileKey: musicKey,
+      coverKey: coverUploaded ? coverKey : null,
+      fileUrl: base ? `${base}/${musicKey}` : null,
+      coverUrl: base && coverUploaded ? `${base}/${coverKey}` : null,
+      sizeBytes,
+      added: new Date().toISOString().slice(0, 10),
+    };
+
+    return track;
+  } finally {
+    // Always clean up temp dir, even on failure
+    await rm(tmpDir, { recursive: true, force: true });
+  }
+}
+
+// ── Main ──
+
+async function sync(playlistUrls: string[]): Promise<void> {
+  if (playlistUrls.length === 0) {
+    log.warn("No playlist URLs provided. Nothing to do.");
+    return;
+  }
+
+  const r2 = makeR2Client();
+  const manifest = await loadManifest(r2);
+  const existing = new Set(Object.keys(manifest.tracks));
+
+  log.info(`Already have ${existing.size} tracks in library`);
+
+  // ── Collect all new entries across all playlists ──────────────────────────
+  const newEntries: PlaylistEntry[] = [];
+  const seenIds = new Set<string>();
+
+  for (const url of playlistUrls) {
+    const trimmed = url.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const entries = await extractPlaylistEntries(trimmed);
+    for (const entry of entries) {
+      if (entry.id && !seenIds.has(entry.id) && !existing.has(entry.id)) {
+        seenIds.add(entry.id);
+        newEntries.push(entry);
+      }
+    }
+  }
+
+  if (newEntries.length === 0) {
+    log.ok("Library is up to date — nothing new to download.");
+    return;
+  }
+
+  log.info(`🆕 ${newEntries.length} new tracks to download`);
+
+  // ── Download + upload with limited concurrency ────────────────────────────
+  let added = 0;
+  let failed = 0;
+
+  await pool(
+    newEntries,
+    async (entry) => {
+      try {
+        const track = await downloadAndUpload(entry, r2, manifest);
+
+        if (track) {
+          manifest.tracks[track.id] = track;
+          added++;
+          // Save after every successful upload — crash-safe
+          await saveManifest(r2, manifest);
+        } else {
+          manifest.failed[entry.id] = {
+            title: entry.title ?? "Unknown",
+            error: "Download or upload failed",
+            attempted: new Date().toISOString().slice(0, 10),
+          };
+          failed++;
+        }
+      } catch (err: any) {
+        log.error(`Unexpected error for "${entry.title}": ${err?.message}`);
+        failed++;
+      }
+    },
+    config.download.maxWorkers,
+  );
+
+  // ── Summary ───────────────────────────────────────────────────────────────
+  console.log("\n" + "=".repeat(50));
+  log.ok(`Sync complete: ${added} added, ${failed} failed`);
+  log.info(`Total library: ${Object.keys(manifest.tracks).length} tracks`);
+  console.log("=".repeat(50) + "\n");
+}
+
+// ── Entry Point ───────────────────────────────────────────────────────────────
+
+const urls: string[] = (() => {
+  // CLI args: npx tsx sync.ts <url1> <url2>
+  const args = process.argv.slice(2).filter((a) => a.startsWith("http"));
+  if (args.length > 0) return args;
+
+  // Env var: PLAYLIST_URLS="url1\nurl2" or comma-separated
+  const env = process.env.PLAYLIST_URLS ?? "";
+  return env
+    .replace(/,/g, "\n")
+    .split("\n")
+    .map((u) => u.trim())
+    .filter((u) => u.startsWith("http"));
+})();
+
+sync(urls).catch((err) => {
+  console.error("Fatal:", err);
+  process.exit(1);
 });

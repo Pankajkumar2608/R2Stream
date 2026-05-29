@@ -25,7 +25,7 @@ export function buildTrackResponse(
 
   return {
     ...track,
-    // Stream URL goes through our Worker (so we can add headers, auth later)
+    // Stream URL goes through our Worker (so we can add headers, auth later(todo : i will add this later i am lazy right now))
     streamUrl: `${baseUrl}/stream/${track.id}`,
     // Cover URL points directly at R2 public bucket (no auth needed for images)
     coverUrl: pub && track.coverKey ? `${pub}/${track.coverKey}` : null,
