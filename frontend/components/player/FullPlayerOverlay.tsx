@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useCallback } from "react"
+import React, { useEffect, useCallback, useState } from "react"
 import { ChevronDown, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Music2 } from "lucide-react"
 import { usePlayerStore } from "@/store/usePlayerStore"
 import { Slider } from "@/components/ui/slider"
@@ -15,14 +15,14 @@ export function FullPlayerOverlay({ isOpen, onClose }: FullPlayerOverlayProps) {
   const { queue, currentIndex, isPlaying, loop, shuffle, togglePlay, nextTrack, prevTrack, toggleLoop, toggleShuffle } = usePlayerStore()
   const currentTrack = queue[currentIndex]
 
-  const [progress, setProgress] = React.useState(0)
-  const [duration, setDuration] = React.useState(0)
+  const [progress, setProgress] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [isDragging, setIsDragging] = useState(false)
 
   // Sync with the global audio element via a polling interval (no DOM querySelector hack)
   useEffect(() => {
     if (!isOpen) return
 
-    // Find the audio element created by BottomPlayer
     const getAudio = (): HTMLAudioElement | null => {
       const elements = document.getElementsByTagName('audio')
       return elements.length > 0 ? elements[0] : null
@@ -31,19 +31,19 @@ export function FullPlayerOverlay({ isOpen, onClose }: FullPlayerOverlayProps) {
     const audio = getAudio()
     if (audio) {
       setDuration(isNaN(audio.duration) ? 0 : audio.duration)
-      setProgress(audio.currentTime || 0)
+      if (!isDragging) setProgress(audio.currentTime || 0)
     }
 
     const interval = setInterval(() => {
       const a = getAudio()
-      if (a) {
+      if (a && !isDragging) {
         setProgress(a.currentTime)
         if (!isNaN(a.duration)) setDuration(a.duration)
       }
     }, 250)
 
     return () => clearInterval(interval)
-  }, [isOpen, currentTrack?.id])
+  }, [isOpen, currentTrack?.id, isDragging])
 
   // Close on Escape key
   useEffect(() => {
@@ -61,23 +61,30 @@ export function FullPlayerOverlay({ isOpen, onClose }: FullPlayerOverlayProps) {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
-  const handleSeek = useCallback((value: number[]) => {
+  const handleSeekChange = useCallback((value: number[]) => {
+    setIsDragging(true)
+    setProgress(value[0])
+  }, [])
+
+  const handleSeekCommit = useCallback((value: number[]) => {
     const elements = document.getElementsByTagName('audio')
     if (elements.length > 0) {
       elements[0].currentTime = value[0]
       setProgress(value[0])
     }
+    setIsDragging(false)
   }, [])
 
   const loopIcon = loop === 'one' ? <Repeat1 size={26} /> : <Repeat size={26} />
-  const progressPercent = duration ? (progress / duration) * 100 : 0
 
+  // If we don't return null completely when closed, at least we must make sure
+  // the blur doesn't bleed. We can hide it with opacity-0 and pointer-events-none.
   return (
     <>
       {/* Backdrop */}
       <div
         className={cn(
-          "fixed inset-0 z-50 bg-black/60 backdrop-blur-sm transition-opacity duration-300",
+          "fixed inset-0 z-50 bg-black/80 backdrop-blur-md transition-opacity duration-300",
           isOpen ? "opacity-100" : "opacity-0 pointer-events-none"
         )}
         onClick={onClose}
@@ -86,12 +93,12 @@ export function FullPlayerOverlay({ isOpen, onClose }: FullPlayerOverlayProps) {
       {/* Panel */}
       <div
         className={cn(
-          "fixed inset-0 z-50 flex flex-col transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]",
-          isOpen ? "translate-y-0" : "translate-y-full pointer-events-none"
+          "fixed inset-0 z-50 flex flex-col transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] overflow-hidden",
+          isOpen ? "translate-y-0 opacity-100" : "translate-y-full opacity-0 pointer-events-none"
         )}
       >
         {/* Dynamic gradient background from cover art */}
-        <div className="absolute inset-0 bg-background">
+        <div className="absolute inset-0 bg-background overflow-hidden">
           {currentTrack?.coverUrl && (
             <>
               <div
@@ -121,8 +128,7 @@ export function FullPlayerOverlay({ isOpen, onClose }: FullPlayerOverlayProps) {
           <div className="flex-1 flex items-center justify-center min-h-0 py-6">
             <div className={cn(
               "relative w-full max-w-[340px] aspect-square rounded-2xl overflow-hidden shadow-2xl shadow-black/50 transition-transform duration-700",
-              isPlaying && "scale-100",
-              !isPlaying && "scale-95"
+              isPlaying ? "scale-100" : "scale-95"
             )}>
               {currentTrack?.coverUrl ? (
                 <img
@@ -150,8 +156,9 @@ export function FullPlayerOverlay({ isOpen, onClose }: FullPlayerOverlayProps) {
             <Slider
               value={[progress]}
               max={duration || 100}
-              step={0.5}
-              onValueChange={handleSeek}
+              step={0.1}
+              onValueChange={handleSeekChange}
+              onValueCommit={handleSeekCommit}
               className="mb-2"
             />
             <div className="flex justify-between text-[11px] text-white/40 font-mono tabular-nums">

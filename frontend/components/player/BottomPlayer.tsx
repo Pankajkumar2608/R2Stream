@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useRef, useEffect, useCallback } from "react"
+import React, { useRef, useEffect, useState, useCallback } from "react"
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Shuffle, Repeat, Repeat1 } from "lucide-react"
 import { usePlayerStore } from "@/store/usePlayerStore"
 import { Slider } from "@/components/ui/slider"
@@ -20,9 +20,10 @@ export function BottomPlayer({ onExpand }: BottomPlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const isLoadingRef = useRef(false)
 
-  const [progress, setProgress] = React.useState(0)
-  const [duration, setDuration] = React.useState(0)
-  const [buffered, setBuffered] = React.useState(0)
+  const [progress, setProgress] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [buffered, setBuffered] = useState(0)
+  const [isDragging, setIsDragging] = useState(false)
 
   // Create audio element once
   useEffect(() => {
@@ -33,7 +34,12 @@ export function BottomPlayer({ onExpand }: BottomPlayerProps) {
 
     const audio = audioRef.current
 
-    const onTimeUpdate = () => setProgress(audio.currentTime)
+    const onTimeUpdate = () => {
+      // Don't update progress from audio if user is dragging the slider
+      if (!isDragging) {
+        setProgress(audio.currentTime)
+      }
+    }
     const onDurationChange = () => {
       if (!isNaN(audio.duration)) setDuration(audio.duration)
     }
@@ -58,7 +64,7 @@ export function BottomPlayer({ onExpand }: BottomPlayerProps) {
       audio.removeEventListener('ended', onEnded)
       audio.removeEventListener('progress', onProgress)
     }
-  }, [])
+  }, [isDragging])
 
   // Handle track changes — prevent AbortError by awaiting properly
   useEffect(() => {
@@ -108,7 +114,7 @@ export function BottomPlayer({ onExpand }: BottomPlayerProps) {
 
   if (!currentTrack) {
     return (
-      <div className="fixed bottom-0 left-0 right-0 h-20 bg-black/80 backdrop-blur-xl border-t border-white/5 flex items-center justify-center z-40 text-white/30 text-sm">
+      <div className="fixed bottom-16 md:bottom-0 left-0 right-0 h-20 bg-black/80 backdrop-blur-xl border-t border-white/5 flex items-center justify-center z-40 text-white/30 text-sm">
         No track selected — pick a song from your library
       </div>
     )
@@ -121,12 +127,18 @@ export function BottomPlayer({ onExpand }: BottomPlayerProps) {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
-  const handleSeek = (value: number[]) => {
+  const handleSeekChange = useCallback((value: number[]) => {
+    setIsDragging(true)
+    setProgress(value[0])
+  }, [])
+
+  const handleSeekCommit = useCallback((value: number[]) => {
     if (audioRef.current) {
       audioRef.current.currentTime = value[0]
       setProgress(value[0])
     }
-  }
+    setIsDragging(false)
+  }, [])
 
   const loopIcon = loop === 'one' ? <Repeat1 size={18} /> : <Repeat size={18} />
 
@@ -218,8 +230,9 @@ export function BottomPlayer({ onExpand }: BottomPlayerProps) {
             <Slider
               value={[progress]}
               max={duration || 100}
-              step={0.5}
-              onValueChange={handleSeek}
+              step={0.1}
+              onValueChange={handleSeekChange}
+              onValueCommit={handleSeekCommit}
             />
             <span className="w-10 tabular-nums">{formatTime(duration)}</span>
           </div>
