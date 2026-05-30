@@ -5,6 +5,12 @@ const API_URL = '/api/proxy'
 
 const fetcher = (url: string) => fetch(url).then(res => res.json())
 
+type SearchResponse = {
+  query: string
+  results: Track[]
+  total: number
+}
+
 export function useTracks(page = 1, limit = 50) {
   const { data, error, isLoading, mutate } = useSWR<{ tracks: Track[], total: number }>(
     `${API_URL}/tracks?page=${page}&limit=${limit}`,
@@ -21,18 +27,18 @@ export function useTracks(page = 1, limit = 50) {
 }
 
 export function useSearch(query: string) {
-  const { data, error, isLoading } = useSWR<Track[]>(
+  const { data, error, isLoading } = useSWR<SearchResponse>(
     query ? `${API_URL}/search?q=${encodeURIComponent(query)}` : null,
-    fetcher
-  )
+    fetcher,
+  );
 
   return {
-    results: data || [],
+    results: data?.results || [],
+    total: data?.total || 0,
     isLoading,
-    isError: error
-  }
+    isError: error,
+  };
 }
-
 export function useStatus() {
   const { data, error, isLoading, mutate } = useSWR<LibraryStatus>(
     `${API_URL}/status`,
