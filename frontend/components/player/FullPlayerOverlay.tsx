@@ -169,7 +169,7 @@ export function FullPlayerOverlay({ isOpen, onClose }: FullPlayerOverlayProps) {
                 }}
               />
               {/* Gradient overlay */}
-              <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/50 to-black/80" />
+              <div className="absolute inset-0 bg-linear-to-b from-black/20 via-black/50 to-black/80" />
               {/* Noise texture */}
               <div
                 className="absolute inset-0 opacity-[0.03] mix-blend-overlay"
@@ -234,12 +234,8 @@ export function FullPlayerOverlay({ isOpen, onClose }: FullPlayerOverlayProps) {
             </div>
           </div>
 
-          {/* === Cover Art — fixed height, never flex-1 === */}
+          {/* === Cover Art  === */}
           <div className="shrink-0 flex items-center justify-center py-4">
-            {/* 
-              Size: fill available width but cap at 40vh so it never pushes 
-              track info off screen. On tall screens it gets bigger naturally.
-            */}
             <div
               className="relative rounded-2xl overflow-hidden ring-1 ring-white/8 shadow-[0_24px_60px_-8px_rgba(0,0,0,0.7)]"
               style={{
@@ -274,7 +270,7 @@ export function FullPlayerOverlay({ isOpen, onClose }: FullPlayerOverlayProps) {
                 </div>
               )}
               {/* Gloss */}
-              <div className="absolute inset-0 bg-gradient-to-b from-white/[0.06] to-transparent pointer-events-none" />
+              <div className="absolute inset-0 bg-linear-to-b from-white/6 to-transparent pointer-events-none" />
             </div>
           </div>
 
@@ -288,7 +284,7 @@ export function FullPlayerOverlay({ isOpen, onClose }: FullPlayerOverlayProps) {
                 {currentTrack?.artist || "Unknown Artist"}
               </p>
             </div>
-            <button className="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-full text-white/30 hover:text-white/60 hover:bg-white/5 transition-all">
+            <button className="w-10 h-10 shrink-0 flex items-center justify-center rounded-full text-white/30 hover:text-white/60 hover:bg-white/5 transition-all">
               <svg
                 width="18"
                 height="18"

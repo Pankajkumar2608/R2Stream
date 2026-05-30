@@ -182,7 +182,7 @@ export function BottomPlayer({ onExpand }: BottomPlayerProps) {
   if (!currentTrack) {
     return (
       <div className="fixed bottom-16 md:bottom-0 left-0 right-0 z-40">
-        <div className="h-[72px] bg-black/90 backdrop-blur-2xl border-t border-white/[0.06] flex items-center justify-center">
+        <div className="h-18 bg-black/90 backdrop-blur-2xl border-t border-white/6 flex items-center justify-center">
           <div className="flex items-center gap-2.5 text-white/20">
             <Music2 size={16} />
             <span className="text-sm font-medium tracking-wide">
@@ -216,7 +216,7 @@ export function BottomPlayer({ onExpand }: BottomPlayerProps) {
         {/* === Seek bar — full-width, interactive strip === */}
         <div
           className={cn(
-            "relative h-1 bg-white/[0.06] cursor-pointer group/seek transition-all duration-200",
+            "relative h-1 bg-white/6 cursor-pointer group/seek transition-all duration-200",
             isHoveringProgress && "h-1.5",
           )}
           onMouseEnter={() => setIsHoveringProgress(true)}
@@ -246,7 +246,7 @@ export function BottomPlayer({ onExpand }: BottomPlayerProps) {
 
         {/* === Main bar === */}
         <div
-          className="relative h-[72px] flex items-center px-3 sm:px-4 gap-3"
+          className="relative h-18 flex items-center px-3 sm:px-4 gap-3"
           style={{
             background: "rgba(10,10,10,0.92)",
             backdropFilter: "blur(32px) saturate(180%)",
@@ -269,7 +269,7 @@ export function BottomPlayer({ onExpand }: BottomPlayerProps) {
 
           {/* ── Track Info ── */}
           <div
-            className="flex items-center gap-3 flex-shrink-0 cursor-pointer group/info"
+            className="flex items-center gap-3 shrink-0 cursor-pointer group/info"
             style={{ width: "clamp(160px, 28%, 280px)" }}
             onClick={onExpand}
           >
@@ -388,7 +388,7 @@ export function BottomPlayer({ onExpand }: BottomPlayerProps) {
               <span className="text-[10px] text-white/30 font-mono tabular-nums w-8 text-right shrink-0">
                 {formatTime(progress)}
               </span>
-              <div className="flex-1 relative h-1 bg-white/[0.08] rounded-full overflow-hidden cursor-pointer">
+              <div className="flex-1 relative h-1 bg-white/8 rounded-full overflow-hidden cursor-pointer">
                 <div
                   className="absolute inset-y-0 left-0 bg-white/15 rounded-full"
                   style={{ width: `${bufferedPct}%` }}
@@ -424,7 +424,7 @@ export function BottomPlayer({ onExpand }: BottomPlayerProps) {
             >
               <VolumeIcon size={15} />
             </button>
-            <div className="w-20 flex-shrink-0">
+            <div className="w-20 shrink-0">
               <Slider
                 value={[Math.round(volume * 100)]}
                 max={100}
